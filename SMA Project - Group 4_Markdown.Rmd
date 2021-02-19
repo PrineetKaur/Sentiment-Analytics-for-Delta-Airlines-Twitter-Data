@@ -1,0 +1,706 @@
+---
+title: "Group 4 Project - Social Media Analytics"
+author: "Anbing FANG, Daria EROKH, Prineet Kaur BHURJI"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+date: "`r format (Sys.time(), '%d %B %Y')`"
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(fig.align = 'center', echo = FALSE, message=FALSE, warning = FALSE)
+```
+
+# Analysis of the Twitter environment of Delta Airlines
+
+   
+## Introduction
+
+For our Project, we chose one of the most popular American Airline brands i.e Delta Airlines. This project is aimed to help Delta Airlines to understand what people think about their service through analyzing information from one of the most popular social media: Twitter.
+Our Analysis includes the following steps:
+
+- Twitter API Calling & Data preparation 
+- WordClouds for analyzing the most popular words used in the tweets
+- Sentiment Analysis using Emotional scores and Positive/Negative Sentiments
+- Topic Modelling using Bigrams
+- Follower Profile Summary elaborating the geographic distribution across the globe
+We collected overall approximately 25000 tweets for Delta Airlines (including both Tweets to Delta and Tweets by Delta).
+
+https://gmishiny.shinyapps.io/DeltaInsight/
+
+We took data from January 2021 from Delta Airlines company. In Twitter it follows 38.8K and it has 1.5M Followers.
+
+```{r message = FALSE, warning=FALSE, include = FALSE}
+
+rm(list =ls())
+#Loading Libraries for Tweet Collection and Sentiment Analysis
+if(!require("wordcloud")) install.packages("wordcloud"); library("wordcloud")
+if(!require("scales")) install.packages("scales"); library("scales")
+if(!require("tidytext")) install.packages("tidytext"); library("tidytext")
+if(!require("textstem")) install.packages("textstem"); library("textstem")
+if(!require("lubridate")) install.packages("lubridate"); library("lubridate")
+if(!require("tidyr")) install.packages("tidyr"); library("tidyr")
+if(!require("rtweet")) install.packages("rtweet"); library("rtweet")
+if(!require("dplyr")) install.packages("dplyr"); library("dplyr")
+if(!require("textdata")) install.packages("textdata");library("textdata")
+if(!require("tm")) install.packages("tm"); library("tm")
+#Libraries for topic modelling 
+if (!require("topicmodels")) install.packages("topicmodels", quiet=TRUE) ; require("topicmodels")
+#Package used for Translation
+if (!require("textcat")) install.packages("textcat", quiet=TRUE) ; require("textcat")
+#Word cloud of Reply Tweets
+if (!require("wordcloud2")) install.packages("wordcloud2", quiet=TRUE) ; require("wordcloud2")
+if (!require("stringr")) install.packages("stringr", quiet=TRUE) ; require("stringr")
+#Libraries for making Graphs for Visualizations
+if (!require("ggplot2")) install.packages("ggplot2", quiet=TRUE) ; require("ggplot2")
+if (!require("igraph")) install.packages("igraph", quiet=TRUE) ; require("igraph")
+#if (!require("ggraph")) install.packages("ggraph", quiet=TRUE) ; require("ggraph")
+if (!require("forestmangr")) install.packages("forestmangr", quiet=TRUE) ; require("forestmangr")
+
+```
+
+```{r data, include = FALSE}
+
+tweets_to_delta = readRDS(file = "tweets_to_delta_total.rds")
+tweets_by_delta = readRDS(file = "tweets_by_delta.rds")
+
+```
+
+## Getting data (tweets) via API
+
+To connect to twitter API, we used OAuthFactory function and Twitter Application credentials.
+To use that you need to apply for Twitter Developers Account explaining why and how data will be used.
+
+`my_token <- create_token(
+    app = "",
+    consumer_key = "",
+    consumer_secret = "",
+    access_token = "",
+    access_secret = "",
+    set_renv=FALSE)`
+
+After that we saved the Retrieved Tweets as an Object so that we don't exhaust our usage limit.
+There are 22 files with data which were merged.
+
+As we wanted to work with more data that is possible to extract using one account, we used 6 accounts.
+
+Giving us in final 23926 tweets from clients and 1000 from Delta to analyze.
+
+## Preparing and cleaning of data
+
+We removed misspeled words, so they wouldn't affect our work.
+That is how cleaned table looks like.
+
+
+```{r remove-misspelled-text}
+#Removing the Misspelled Text
+tweets_to_delta$text <-  gsub("https\\S*", "", tweets_to_delta$text)
+tweets_to_delta$text <-  gsub("@\\S*", "", tweets_to_delta$text) 
+tweets_to_delta$text <-  gsub("amp", "", tweets_to_delta$text) 
+tweets_to_delta$text <-  gsub("[\r\n]", "", tweets_to_delta$text)
+tweets_to_delta$text <-  gsub("[[:punct:]]", "", tweets_to_delta$text)
+
+head(tweets_to_delta, 2)
+
+```
+
+After we tokenized words and removed stop words.
+
+```{r token-remove-stop-words, include = FALSE}
+# Tokenization and Removal of Stop words
+tweets_to <- tweets_to_delta %>%
+            select(text) %>%
+            unnest_tokens(word, text)
+
+tweets_to <- tweets_to %>%
+            anti_join(stop_words)
+
+# Getting the No Retweet Data
+noretweets <- tweets_by_delta[tweets_by_delta$is_retweet==FALSE, ] 
+noretweets <- subset(noretweets, is.na(noretweets$reply_to_status_id))
+
+noretweets <- noretweets%>% 
+              arrange(-favorite_count)
+              noretweets[1,5]
+
+noretweets <- noretweets %>% 
+              arrange(-retweet_count)
+              noretweets[1,5]
+              
+# Keeping only the Retweets
+retweets<- tweets_by_delta[tweets_by_delta$is_retweet==TRUE,]
+
+# Keeping only the Replies
+replies <- subset(tweets_by_delta, !is.na(tweets_by_delta$reply_to_status_id))
+
+#Removal of Noise and Punctuation
+replies$text <-  gsub("https\\S*", "", replies$text)
+replies$text <-  gsub("@\\S*", "", replies$text) 
+replies$text <-  gsub("amp", "", replies$text) 
+replies$text <-  gsub("[\r\n]", "", replies$text)
+replies$text <-  gsub("[[:punct:]]", "", replies$text)
+
+# Tokenization and Removal of Stop words
+tweets_by <- replies %>%
+          select(text) %>%
+          unnest_tokens(word, text)
+
+tweets_by <- tweets_by %>%
+          anti_join(stop_words)
+
+```
+
+## Creation of graphs, world clouds and analysis
+
+## The Most Frequent Words used for Tweets TO Delta Airlines
+
+To our mind first 5 words are quite obvious as those are words correlated to flights and company itself. On 6 places there is word "support" and that would be essential for future analyze to go deeper in those tweets where people mention that word as it might be both negative or positive: "great support Delta!" or "awful support, never returned money".
+
+```{r freq-words-tweets}
+
+#Displaying the Most Frequent Words used for Tweets to Delta Airlines (with the help of a Bar Graph)
+tweets_to %>% 
+          count(word, sort = TRUE) %>%
+          top_n(15) %>%
+          mutate(word = reorder(word, n)) %>%
+          ggplot(aes(x = word, y = n)) +
+          geom_col(fill="grey") +
+          xlab(NULL) +
+          coord_flip() +
+          labs(y = "Count",
+          x = "Unique words",
+          title = "Most Frequent Words used for Tweets made to Delta Airlines",
+          subtitle = "(After removing the Stop Words)")
+
+```
+
+## The Most Frequent Words used for Tweets BY Delta Airlines
+
+The most popular words are "confirmation" and "dm" - direct message. As seen later there are a lot of negative sentiments. That mightlead to proposing resoluyion in direct messages.
+
+```{r frequent-words-tweets }
+
+#Displaying the Most Frequent Words used for Replies by Delta Airlines (with the help of a Bar Graph)
+tweets_by %>% 
+          count(word, sort = TRUE) %>%
+          top_n(15) %>%
+          mutate(word = reorder(word, n)) %>%
+          ggplot(aes(x = word, y = n)) +
+          geom_col(fill="grey") +
+          xlab(NULL) +
+          coord_flip() +
+          labs(y = "Count",
+          x = "Unique words",
+          title = "Most Frequent Words used for Replies made by Delta Airlines",
+          subtitle = "(After removing the Stop Words)")
+```
+
+## Sentiment analysis of Replies from Delta Airlines
+
+Amount of negative sentiments is twice higher than positive.
+
+As it can be seen from the bars top two reasons for negative feedback are inconvinience and delays. Delays are easy understandable cause while inconviniece might be studied deeper in order to see what exactly was the reason: delays, bad timing of flights, COVID measures etc.
+
+Word "concern" and "concerns" have the same meaning. That would double bar chart of "concern" and give one more topic for investigation: what are clients so concerned about.
+
+Speaking about positive sentiments it's obvious that people are happy because they are safe, also company makes refunds and probably staff members are patient and sincere. Other words are grads of happiness felt by clients.
+
+
+```{r sentiment-analysis }
+
+# Sentiment analysis of Replies from Delta Airlines
+
+get_sentiments("bing") %>% count(sentiment)
+
+tweets_by_sentiment <- inner_join(tweets_by,get_sentiments("bing"))
+
+tweets_by_delta_summary <-tweets_by_sentiment %>%  
+                          count(word,sentiment,sort=TRUE) %>%
+                          group_by(sentiment) %>%
+                          top_n(10) %>%  
+                          arrange(n) %>%
+                          as.data.frame(stringsAsFactors=FALSE)
+
+tweets_by_delta_summary %>%
+                          ungroup() %>%
+                          mutate(word = reorder(word, n)) %>%
+                          ggplot(aes(word, n, fill = sentiment)) +
+                          geom_col(show.legend = FALSE) +
+                          facet_wrap(~sentiment, scales = "free_y") +
+                          labs(title = "Wordwise Contribution to Overall Sentiments - Negative or Positive", x = NULL) +
+                          coord_flip()
+
+```
+
+## Topic Analysis of Tweets from Top 6 Competitors
+
+On this graphs we can see what clients of competitors tweet. So far it doesn't represent a significant insights and shows that mostly people tweet about the same topics.
+
+
+```{r competitors}
+
+tweets_comparisons = readRDS(file = "tweets_comparisons.rds")
+
+comparison_tokenized <- tweets_comparisons %>% 
+                        unnest_tokens(output = "word",
+                        input = text,
+                        token = "words",
+                        drop=FALSE,to_lower=TRUE,collapse=NULL)
+
+comparison_tokenized <- comparison_tokenized %>%
+                        anti_join(stop_words)%>%      
+                        count(status_id,word , sort=TRUE) %>%
+                        cast_dtm(document = status_id, term = word,value = n, weighting = tm::weightTf)
+
+lda_comparison <- LDA(comparison_tokenized, k = 3,method="gibbs",control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 2:6) )
+
+# Top Terms per Topic
+
+comparison_topics <- tidy(lda_comparison, matrix = "beta")
+
+top_comparison_terms <- comparison_topics %>%
+                          group_by(topic) %>%
+                          top_n(10, beta) %>%
+                          ungroup() %>%
+                          arrange(topic, -beta)
+
+top_comparison_terms %>%
+                     mutate(term = reorder_within(term, beta, topic)) %>%
+                     ggplot(aes(term, beta, fill = factor(topic))) +
+                     geom_col(show.legend = FALSE) +
+                     facet_wrap(~ topic, scales = "free") +
+                     coord_flip() +
+                     labs(title = "Top Terms per Topic", x = NULL) +
+                     scale_x_reordered()
+
+```
+
+## Top 10 Most Liked Tweets of Delta Airlines (in January'2021)
+
+Table with the most popular tweets.
+
+```{r top-10-tweets}
+
+Delta_total = readRDS(file = "tweets_to_delta_total.rds")
+#Most liked tweets
+Delta_total %>%
+           arrange(-favorite_count) %>%
+           top_n(10, favorite_count) %>% 
+           select(created_at, screen_name, text, favorite_count)
+
+```
+
+## Top 10 Most Frequently Shared Links by Delta Airlines (in January'2021)
+
+Most frequently shared links.
+
+```{r top-10-links}
+
+#Most frequently shared link
+Delta_total %>%
+      filter(!is.na(urls_expanded_url)) %>% 
+      count(urls_expanded_url, sort = TRUE) %>% 
+      top_n(10)
+
+```
+
+## Top 10 Hashtags occurying in the Tweets for Delta Airlines (in January'2021)
+
+As the main topic of passed January was change of presidents in the USA, ex-president #Trump is the most popular hashtag.
+
+```{r top-hastags}
+
+Delta_total %>%
+  unnest_tokens(hashtag, text, "tweets", to_lower = FALSE) %>%
+  filter(str_detect(hashtag, "^#")) %>%
+  count(hashtag, sort = TRUE) %>%
+  top_n(10) %>%
+  ggplot(aes(x = reorder(hashtag,n), y = n, fill = hashtag)) +
+              geom_col() +
+              coord_flip() +
+              labs(x = "hashtag",
+              y = "count",
+              title = "Top Hashtags of various Twitters")
+
+```
+
+## Top 10 Mentions in the Tweets for Delta Airlines (in January'2021)
+
+It would be interesting to understand in what context clients mention competitors: negative or positive sentiments. Suprisinglym people metion Coca-Cola and various TelCom companies.
+
+```{r top-mentions}
+
+Delta_total %>%
+          unnest_tokens(mentions, text, "tweets", to_lower = FALSE) %>%
+          filter(str_detect(mentions, "^@")) %>%  
+          count(mentions, sort = TRUE) %>%
+          top_n(10) %>%
+          ggplot(aes(x = reorder(mentions,n), y = n, fill = mentions)) +
+          geom_col() +
+          coord_flip() +
+          labs(x = "mentions",
+               y = "count",
+               title = "Top Mentions of various Twitters")
+
+```
+
+## Analysis of "Twitter Status Frequency"
+
+There are no specific trends in user's tweets but we can see that on evenings of Sundays and Mondays people post more.
+
+```{r status-frequency }
+
+Delta_clean = readRDS(file = "tweets_delta_clean.rds")
+
+Delta_clean %>%
+              ts_plot("hours") +
+              ggplot2::theme_minimal() +
+              ggplot2::theme(plot.title = ggplot2::element_text(face = "bold")) +
+              ggplot2::labs(x = NULL, y = NULL,
+              title = "Frequency of Twitter statuses posted for Delta Airlines",
+              subtitle = paste0(format(min(Delta_clean$created_at), "%d %B %Y"), " to ", 
+                                format(max(Delta_clean$created_at),"%d %B %Y")),
+              caption = "\nSource: Data collected from Twitter's REST API via rtweet"
+              )
+
+```
+
+Answers from Delta are usually 1-2 days later but the trend is the same.
+
+```{r status-frequency-2 }
+
+tmls = readRDS(file = "freq_twitter_status.rds")
+
+tmls %>%
+      dplyr::filter(created_at > "2020-12-30") %>%
+      dplyr::group_by(screen_name) %>%
+      ts_plot("days", trim = 1L) +
+      ggplot2::geom_point() +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(
+      legend.title = ggplot2::element_blank(),
+      legend.position = "bottom",
+      plot.title = ggplot2::element_text(face = "bold")) +
+      ggplot2::labs(x = NULL, y = NULL,
+      title = "Frequency of Twitter statuses posted by Delta Airlines",
+      subtitle = paste0(format(min(Delta_clean$created_at),"%d %B %Y"), " to ", 
+                        format(max(Delta_clean$created_at),"%d %B %Y")),
+      caption = "\nSource: Data collected from Twitter's REST API via rtweet"
+  )
+
+```
+
+## Top 10 Tweeter Users making Maximum No. of Tweets (in January'2021)¶
+
+Some of the accounts are obvious: SecretFlying or GetYouRefund. They are connected to flight tickes and airlines - one finds great deals, second helps with refund. Other accounts are not so obvious and need further investigation - why they are in top-10?
+
+```{r top-10-users-mentioning-delta }
+
+# Top tweeters
+tweets_to_delta %>% 
+              count(screen_name, sort = TRUE) %>%
+              top_n(10) %>%
+              mutate(screen_name = paste0("@", screen_name)) %>%
+              ggplot(aes(x = reorder(screen_name,n), y = n, fill = screen_name)) +
+              geom_col() +
+              coord_flip() +
+              labs(x = "Name of Twitter User (screen_name)",
+              y = "Count of Tweets they made",
+              title = "Top 10 Tweeters as per the Count of Tweets they made")
+
+```
+
+## Top Plaforms used by Users Tweeting about Delta Airlines
+
+There is a huge gap between iPhone and Android users. Twitter for iPhone is used by 50% of clients who tweet about Delta.
+If users of website and mobile application show the same trend, there is a huge need in developing and maintaining in great shape mobile app for iPhones while investing a bit less in Android's.
+
+```{r top-platforms }
+
+td_app <- Delta_clean %>% 
+  select(source) %>% 
+  group_by(source) %>%
+  summarize(count=n())
+td_app <- subset(td_app, count > 11)
+
+library(forestmangr)
+data <- data.frame(
+  category=td_app$source,
+  count=td_app$count
+)
+data$fraction = data$count / sum(data$count)
+data$percentage = data$count / sum(data$count) * 100
+data$ymax = cumsum(data$fraction)
+data$ymin = c(0, head(data$ymax, n=-1))
+data <- round_df(data, 2)
+Source <- paste(data$category, data$percentage, "%")
+ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Source)) +
+  geom_rect() +
+  coord_polar(theta="y") + 
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "right")
+
+```
+
+## Top Languages Spoken by Users that follow Delta Airlines
+
+Surprisingly it's not English. That information might influence adding different languages to SMM campaighns.
+
+```{r top-language }
+
+# Reading the object stored in previous step for our further analysis
+delta_memberships = readRDS(file = "delta_memberships.rds")
+
+# Topic modelling for the Memberships 
+delta_memberships$name <-  gsub("@\\S*", "", delta_memberships$name)
+
+# Detect the Language per column "name"
+delta_memberships$language <- textcat(delta_memberships$name)
+
+cloud_languages <- termFreq(delta_memberships$language)
+
+wordcloud(names(cloud_languages),cloud_languages,max.words=50,scale=c(1,1),
+          colors = brewer.pal(6,"YlOrRd"),random.order=FALSE)
+
+```
+
+## Top Locations of Users Tweeting about Delta Airlines
+
+This analysis might be developed further into finding correlation between angry tweets and airports. For example, Los Angeles airport accumulates the most of negative feedback. That might lead to negotiations with the airport to understand why there are delays or something like that.
+
+```{r locations-top }
+
+user_info = readRDS(file = "user_info.rds")
+
+library(ggplot2)
+
+user_info %>% filter(location!="") %>% count(location, sort = TRUE) %>%
+              mutate(location = reorder(location, n, desc)) %>%
+              top_n(10)%>%
+              ggplot(aes(x = reorder(location, n), y = n, fill = location)) +
+              geom_col() +
+              coord_flip() +
+              labs(x = "Count",
+              y = "Location",
+              title = "Top Locations of various Twitters") + 
+              theme(axis.text.x=element_blank())
+
+```
+
+## World Map showing Global Distribution of Users Tweeting about Delta Airlines
+
+The USA has the most tweets, though there is a huge red spot in Africa and it would be interesting to investigate why. All other red dots all over the map correspond to huge airport hubs.
+
+```{r map-tweets }
+
+# Add latitude and longitude when possible
+lat_lng_data <- lat_lng(Delta_clean)
+
+# Install maps package
+if(!require("maps")) install.packages("maps"); library("maps")
+
+## Make a map of the world with country boundaries
+par(mar = c(0, 0, 0, 0))
+maps::map("world", lwd = .25)
+
+## Plot lat and lng points onto world map
+points(lat_lng_data$lng, lat_lng_data$lat, pch = 20, cex = 1,col="red")
+
+```
+
+## Sentiment Analysis (Classifying Tweets into 10 different Emotions ) 
+
+Anger, Anticipation, Disgust, Fear, Joy, Sadness, Surprise, Trust, Negative and Positive.
+
+As it's seen on the graph, positive and negative emotions are quite close.
+
+
+```{r emotions }
+
+require(syuzhet)
+
+#We will first try to get the emotion score for each of the tweets. 
+
+Delta_clean.df <- as.vector(Delta_clean$text)
+#We will first try to get the emotion score for each of the tweets. 
+
+Delta_clean.df <- as.vector(Delta_clean$text)
+
+emotion.df1 <- get_nrc_sentiment(Delta_clean.df)
+
+emotion.df2 <- cbind(Delta_clean$text, emotion.df1) 
+
+head(emotion.df2)
+
+# Converting tweets to ASCII to trackle strange characters
+emotions               <- iconv(Delta_clean, from="UTF-8", to="ASCII", sub="")
+
+# removing retweets, in case needed 
+emotions               <- gsub("(RT|via)((?:\\b\\w*@\\w+)+)","",emotions)
+
+# removing mentions, in case needed
+emotions               <- gsub("@\\w+","",emotions)
+
+ew_sentiment           <- get_nrc_sentiment((emotions))
+
+sentimentscores        <- data.frame(colSums(ew_sentiment[,]))
+
+names(sentimentscores) <- "Score"
+
+sentimentscores <- cbind("sentiment"=rownames(sentimentscores),sentimentscores)
+
+rownames(sentimentscores) <- NULL
+
+ggplot(data=sentimentscores,aes(x=reorder(sentiment,-Score),y=Score))+
+              geom_bar(aes(fill=sentiment),stat = "identity")+
+              theme(legend.position="none")+
+              xlab("Sentiments")+ylab("Scores")+
+              ggtitle("Sentiments based on Emotional Scores of Tweets")+
+              theme_minimal() + 
+              theme(axis.text.x=element_blank())
+
+
+```
+
+## Topic Analysis using Bigram
+
+```{r prep-bigram, message=FALSE}
+
+# load some packages that we will use
+for (i in c('SnowballC','slam','tm','Matrix','tidytext','dplyr','hunspell','purrr','wordcloud','RWeka')){
+  if (!require(i, character.only=TRUE)) install.packages(i, repos = "http://cran.us.r-project.org")
+  require(i, character.only=TRUE)
+}
+
+```
+
+### For Tweets "TO" Delta Airlines
+
+Data for world clouds has to be pre-processed to delete noise and mingless words such as 'a', 'the', 'was' etc. Here we can see pre-processed world-cloud. Later there will be an example of a not prepared data.
+
+```{r to-delta-bigram, message=FALSE}
+
+# Impletmenting bigrams
+
+temp1 <- mutate(tweets_to_delta, text = gsub(x = text, pattern = "http\\w+ *", replacement = ""))
+
+To_Delta_Count <- temp1 %>% unnest_tokens(output = "bigram", 
+                                                   input = text,
+                                                   token = "ngrams", n=2, drop=FALSE) %>% count(status_id,bigram)
+To_Delta_DTM <- To_Delta_Count %>% cast_dtm(status_id,bigram,n)
+
+# Making the Word Cloud 
+
+to_delta_bigram <- To_Delta_Count %>% group_by(bigram) %>% summarize(freq = n())
+wordcloud(to_delta_bigram$bigram, to_delta_bigram$freq, max.words = 40, scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+### For Tweets "BY" Delta Airlines
+
+"Apologize for" is clearly seen as one of the leaders. No wonder most of the tweets have negative sentiment.
+
+
+```{r by-delta-bigram, message=FALSE}
+
+# Impletmenting bigrams
+
+temp2 <- mutate(tweets_by_delta, text = gsub(x = text, pattern = "http\\w+ *", replacement = ""))
+
+To_Delta_Count <- temp2 %>% unnest_tokens(output = "bigram", 
+                                                   input = text,
+                                                   token = "ngrams", n=2, drop=FALSE) %>% filter(bigram!="t.co 6idgbjrmtu") %>% count(status_id,bigram)
+To_Delta_DTM <- To_Delta_Count %>% cast_dtm(status_id,bigram,n)
+
+# Making the Word Cloud 
+
+to_delta_bigram <- To_Delta_Count %>% group_by(bigram) %>% summarize(freq = n())
+wordcloud(to_delta_bigram$bigram, to_delta_bigram$freq, max.words = 40, scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+## WordCloud for "Tweets to Delta Airlines"
+
+This is word cloud before pre-processing. Just 'the', 'a', 'was' etc.
+
+```{r before-word-cloud, message=FALSE}
+
+if (!require("wordcloud")) {
+  install.packages("wordcloud",repos="https://cran.rstudio.com/",quiet=TRUE)
+  require("wordcloud")
+}
+
+# Word cloud BEFORE text pre-processing
+
+tf <- termFreq(tweets_to_delta$text)
+
+wordcloud(names(tf),tf,max.words=40,scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+
+This word cloud shows sence as it was cleaned.
+
+
+```{r after-word-cloud, message=FALSE}
+
+# Word cloud AFTER text pre-processing
+
+tweets_freq <- tweets_to %>%
+               group_by(word) %>% 
+               summarize(freq = n()) %>%
+               arrange(-freq) 
+
+wordcloud(tweets_freq$word, tweets_freq$freq, max.words=50, scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+### WordCloud for "Tweets by Delta Airlines"
+
+Not cleaned word cloud.
+
+```{r by-delta-before-word-cloud, message=FALSE}
+
+# Word cloud BEFORE text pre-processing
+
+tf <- termFreq(tweets_by_delta$text)
+
+wordcloud(names(tf),tf,max.words=40,scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+Cleaned word cloud.
+
+```{r by-delta-after-word-cloud, message=FALSE}
+
+# Word cloud AFTER text pre-processing
+
+tweets_freq <- tweets_by %>%
+               group_by(word) %>% 
+               summarize(freq = n()) %>%
+               arrange(-freq) 
+
+wordcloud(tweets_freq$word, tweets_freq$freq, max.words=50, scale=c(3,1), colors = brewer.pal(8,"Dark2"))
+
+```
+
+## Conclusion
+
+With the overall tweets data that we were able to collect we were able to summarize the overall user tweet trend to Delta airlines which included
+
+- User Trend – Through our analysis, we found user-specific data like the most liked post, most popular hashtags among users, most shared links, etc
+
+- Tweeter Status Frequency – This helped us understand the most likable days of the month when users post about Delta Airlines and in return the tendency of Delta airlines to post replies to the user tweets.
+
+- User Profile – This included top users making maximum tweets about Delta Airlines, their most preferred platforms, top languages they spoke.
+
+- Sentiment Analysis – Based on the Emotions scores of the Tweets. Also, engagement & activity regarding the sentiments (positive / negative). It was even observed that Delta Airlines replies to tweets more often when there is extremely positive or negative sentiment.
+
+- Did a detailed Topic Analysis using Bigrams.
+
+- Follower Profile Summary - Used a world map to see the overall distribution of Tweets users across the globe and their top locations.
