@@ -1,2 +1,2 @@
-# Twitter-Text-Analytics-for-Delta-Airlines
+# Twitter-Text-Analytic-for-Delta-Airlines
 Project in R (with dashboards using Shiny & Markdown)
